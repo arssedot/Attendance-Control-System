@@ -75,7 +75,10 @@ def test_qr_flow_is_idempotent_and_private(client, seeded_database):
     assert first.json()["status"] == "PRESENT"
     roster = f"{PREFIX}/sessions/{session['id']}/attendance"
     assert_error(client.get(roster, headers=student), 403, "ROLE_FORBIDDEN")
-    assert [row["student_name"] for row in client.get(roster, headers=teacher).json()] == ["Илья Соколов"]
+    row, = client.get(roster, headers=teacher).json()
+    assert row["student_name"] == "Илья Соколов"
+    assert row["has_location"] is False
+    assert_error(client.get(f"{roster}/{row['student_id']}/location", headers=teacher), 404, "LOCATION_NOT_FOUND")
     assert client.get(f"{PREFIX}/student/attendance", headers=student).json()[0]["method"] == "QR"
     assert client.get(f"{PREFIX}/student/attendance", headers=outsider).json() == []
     assert current_lesson(client, student)["marked"] is True
@@ -86,7 +89,7 @@ def test_geo_and_late_cutoff(client, seeded_database):
     teacher = headers(login(client, "teacher", "web")[0])
     student = headers(login(client, "student", "mobile")[0])
     lesson = current_lesson(client, teacher)
-    open_lesson(client, teacher, lesson["id"], late_after_minutes=0)
+    session = open_lesson(client, teacher, lesson["id"], late_after_minutes=0)
     route = f"{PREFIX}/attendance/geo"
     values = {**GEO, "schedule_id": lesson["id"]}
     assert_error(client.post(route, json={**values, "horizontal_accuracy": 60}, headers=student), 422, "GEO_INACCURATE")
@@ -96,11 +99,28 @@ def test_geo_and_late_cutoff(client, seeded_database):
     assert result.status_code == 200
     assert result.json()["status"] == "LATE"
     assert result.json()["method"] == "GEO"
+    repeated = client.post(route, json={**values, "horizontal_accuracy": 12}, headers=student)
+    assert repeated.json() == result.json()
+    roster = f"{PREFIX}/sessions/{session['id']}/attendance"
+    row, = client.get(roster, headers=teacher).json()
+    assert row["has_location"] is True
+    assert "latitude" not in row
+    assert "latitude" not in client.get(f"{PREFIX}/student/attendance", headers=student).json()[0]
+    location = f"{roster}/{row['student_id']}/location"
+    assert_error(client.get(location, headers=student), 403, "ROLE_FORBIDDEN")
+    assert client.patch(f"{PREFIX}/sessions/{session['id']}", json={"close": True}, headers=teacher).status_code == 200
+    stored = client.get(location, headers=teacher)
+    assert stored.status_code == 200
+    assert stored.headers["cache-control"] == "no-store"
+    assert stored.json() == {**GEO, "building_name": "Учебный корпус 1"}
     with psycopg.connect(seeded_database) as conn:
         columns = conn.execute(
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'attendance'"
         ).fetchall()
+        conn.execute("DELETE FROM attendance_geolocations")  # Legacy marks have no saved coordinates.
     assert {column[0] for column in columns} == {"session_id", "student_id", "created_at", "method", "status"}
+    assert client.get(roster, headers=teacher).json()[0]["has_location"] is False
+    assert_error(client.get(location, headers=teacher), 404, "LOCATION_NOT_FOUND")
 
 
 def test_rotation_close_expiry_and_foreign_teacher(client, seeded_database):
@@ -119,6 +139,9 @@ def test_rotation_close_expiry_and_foreign_teacher(client, seeded_database):
     path = f"{PREFIX}/sessions/{session['id']}"
     assert_error(client.get(path, headers=other_teacher), 404, "SESSION_NOT_FOUND")
     assert_error(client.get(path + "/attendance", headers=other_teacher), 404, "SESSION_NOT_FOUND")
+    assert_error(
+        client.get(path + f"/attendance/{uuid4()}/location", headers=other_teacher), 404, "SESSION_NOT_FOUND"
+    )
     assert_error(client.patch(path, json={"close": True}, headers=other_teacher), 404, "SESSION_NOT_FOUND")
     original = qr_token(seeded_database, session)
     updated = client.patch(path, json={"ttl_minutes": 30, "late_after_minutes": 7}, headers=teacher)

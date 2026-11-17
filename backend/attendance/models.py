@@ -102,7 +102,16 @@ class Mark(BaseModel):
 
 
 class RosterMark(Mark):
+    student_id: UUID
     student_name: str
+    has_location: bool
+
+
+class MarkLocation(BaseModel):
+    latitude: float
+    longitude: float
+    horizontal_accuracy: float
+    building_name: str
 
 
 class HistoryMark(Mark):

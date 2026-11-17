@@ -9,6 +9,7 @@ import {
 import { Brand, ErrorNotice, messageOf } from './App'
 import { authorized } from './auth'
 import { SessionPanel } from './SessionPanel'
+import { MarkLocationDialog } from './MarkLocationDialog'
 
 const sessionLabels = { ACTIVE: 'Регистрация открыта', EXPIRED: 'Срок истёк', CLOSED: 'Завершено' } as const
 const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -174,6 +175,7 @@ export function Dashboard({ user, themeControl, onLogout }: {
 
 function Roster({ sessionId }: { sessionId: string }) {
   const [rows, setRows] = useState<RosterMark[]>([])
+  const [selectedPoint, setSelectedPoint] = useState<RosterMark | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -216,11 +218,16 @@ function Roster({ sessionId }: { sessionId: string }) {
     {error && <ErrorNotice message={error} />}
     {rows.length > 0 ? <div className="table-scroll"><table aria-label="Отметки студентов">
       <thead><tr><th>Студент</th><th>Время</th><th>Способ</th><th>Статус</th></tr></thead>
-      <tbody>{rows.map((row, index) => <tr key={`${row.created_at}-${row.student_name}-${index}`}>
-        <td>{row.student_name}</td><td>{timeLabel(row.created_at)}</td><td>{methodLabel(row.method)}</td>
+      <tbody>{rows.map(row => <tr key={row.student_id}>
+        <td>{row.student_name}</td><td>{timeLabel(row.created_at)}</td><td>
+          {methodLabel(row.method)}
+          {row.has_location && <button className="location-link" onClick={() => setSelectedPoint(row)}>Показать точку</button>}
+          {row.method === 'GEO' && !row.has_location && <span className="location-caption">Точка недоступна</span>}
+        </td>
         <td><span className={`badge ${row.status === 'PRESENT' ? 'positive' : 'warning'}`}>{statusLabel(row.status)}</span></td>
       </tr>)}</tbody>
     </table></div> : !busy && !error && <p className="empty-inline">Студенты ещё не отметились.</p>}
     {hasMore && <button className="button secondary more" onClick={() => void loadMore()} disabled={busy}>Ещё отметки</button>}
+    {selectedPoint && <MarkLocationDialog row={selectedPoint} onClose={() => setSelectedPoint(null)} />}
   </section>
 }

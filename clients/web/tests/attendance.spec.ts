@@ -56,6 +56,12 @@ test('преподаватель открывает QR, студенты отм�
   await page.getByRole('button', { name: 'Обновить', exact: true }).click()
   await expect(page.getByRole('row', { name: /Илья Соколов.*QR-код/ })).toBeVisible()
   await expect(page.getByRole('row', { name: /Мария Новикова.*Геолокация/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Показать точку' }).click()
+  const point = page.getByRole('dialog', { name: 'Точка отметки' })
+  await expect(point.getByText('56,2955°')).toBeVisible()
+  await expect(point.getByText('43,9833°')).toBeVisible()
+  await expect(point.getByText('8 м', { exact: true })).toBeVisible()
+  await point.getByRole('button', { name: 'Закрыть точку отметки' }).click()
   if (process.env.QA_SCREENSHOTS) {
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.screenshot({ path: 'test-results/attendance-desktop.png', fullPage: true })

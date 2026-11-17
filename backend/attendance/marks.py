@@ -63,6 +63,14 @@ def register(conn: Db, user: dict, *, qr: QrProof | None = None, geo: GeoMark | 
         """,
         (row["id"], user["id"], now, "QR" if qr else "GEO", "PRESENT" if now <= row["late_at"] else "LATE"),
     ).fetchone()
+    if inserted and geo:
+        conn.execute(
+            """
+            INSERT INTO attendance_geolocations (session_id, student_id, latitude, longitude, horizontal_accuracy)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (row["id"], user["id"], geo.latitude, geo.longitude, geo.horizontal_accuracy),
+        )
     result = inserted or existing_mark(conn, row["id"], user["id"])
     return Mark.model_validate({**result, "schedule_id": row["schedule_id"]})
 

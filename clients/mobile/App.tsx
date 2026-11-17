@@ -4,7 +4,8 @@ import {
   StatusBar, StyleSheet, Text, TextInput, View,
 } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
-import { CameraView, useCameraPermissions } from 'expo-camera'
+import { CameraView, scanFromURLAsync, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera'
+import { File } from 'expo-file-system'
 import * as Location from 'expo-location'
 import {
   ApiError, type HistoryMark, type Lesson, type Mark, type User,
@@ -176,9 +177,15 @@ function StudentHome({ user, onLogout, onExpired }: {
   const [mark, setMark] = useState<Mark | null>(null)
   const [busy, setBusy] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
+  const [scanStatus, setScanStatus] = useState('')
+  const [scanError, setScanError] = useState('')
   const [cameraPermission, requestCamera] = useCameraPermissions()
   const [foreground, setForeground] = useState(AppState.currentState === 'active')
+  const camera = useRef<CameraView>(null)
+  const scannerActive = useRef(false)
   const scanning = useRef(false)
+  const scanPaused = useRef(false)
   const running = useRef(false)
   const expiredCallback = useRef(onExpired)
   expiredCallback.current = onExpired
@@ -253,18 +260,54 @@ function StudentHome({ user, onLogout, onExpired }: {
         if (!permission.canAskAgain) settingsPrompt('камере')
         throw new Error('Для сканирования разрешите доступ к камере.')
       }
-      scanning.current = false
+      scannerActive.current = true
+      scanPaused.current = false
+      setCameraReady(false)
+      setScanError('')
       setCameraOpen(true)
     })
   }
 
-  function scan(token: string) {
+  function closeCamera() {
     if (scanning.current) return
-    scanning.current = true
+    scannerActive.current = false
     setCameraOpen(false)
-    void perform(async () => saved(await authorized<Mark>('/attendance/qr', {
-      method: 'POST', body: { token },
-    })))
+  }
+
+  async function readQr(decode: () => Promise<BarcodeScanningResult[]>) {
+    if (!scannerActive.current || scanning.current) return
+    scanning.current = true
+    scanPaused.current = false
+    setScanError('')
+    setScanStatus('Считываем QR-код…')
+    try {
+      const [code] = await decode()
+      const token = (code?.raw && code.raw !== 'null' ? code.raw : code?.data)?.trim()
+      if (!token) throw new Error('QR-код не считался. Поднесите камеру ближе и попробуйте снова.')
+      setScanStatus('QR-код считан. Проверяем отметку…')
+      const result = await authorized<Mark>('/attendance/qr', { method: 'POST', body: { token } })
+      scannerActive.current = false
+      setCameraOpen(false)
+      saved(result)
+    } catch (cause) {
+      scanPaused.current = true
+      if (cause instanceof ApiError && cause.status === 401) onExpired(errorText(cause))
+      else setScanError(errorText(cause))
+    } finally {
+      scanning.current = false
+      setScanStatus('')
+    }
+  }
+
+  async function decodeFrame(): Promise<BarcodeScanningResult[]> {
+    const picture = await camera.current?.takePictureAsync({ shutterSound: false })
+    if (!picture) throw new Error('Не удалось получить кадр с камеры.')
+    const file = new File(picture.uri)
+    try {
+      return await scanFromURLAsync(file.uri, ['qr'])
+    } finally {
+      if (file.exists) file.delete()
+    }
   }
 
   function geo(lesson: Lesson) {
@@ -344,7 +387,10 @@ function StudentHome({ user, onLogout, onExpired }: {
         <Text style={styles.muted}>{lesson.building_name} · ауд. {lesson.room}</Text>
         <Text style={styles.muted}>{lesson.teacher_name}</Text>
         {lesson.marked ? <Text style={styles.marked}>Отметка сохранена</Text>
-          : lesson.session_state === 'ACTIVE' ? <Button secondary disabled={disabled} onPress={() => void geo(lesson)}>Отметиться по геолокации</Button>
+          : lesson.session_state === 'ACTIVE' ? <>
+            <Button secondary disabled={disabled} onPress={() => void geo(lesson)}>Отметиться по геолокации</Button>
+            <Text style={styles.muted}>Координаты и погрешность сохранятся с отметкой. Их сможет увидеть преподаватель занятия.</Text>
+          </>
             : <Text style={styles.muted}>{lesson.session_state ? 'Регистрация завершена' : 'Регистрация ещё не открыта'}</Text>}
       </View>)}
       {loaded && screen === 'history' && records.map(record => <View key={record.session_id} style={styles.card}>
@@ -357,16 +403,26 @@ function StudentHome({ user, onLogout, onExpired }: {
         ? <Text style={styles.muted}>{screen === 'schedule' ? 'На этот день занятий нет.' : 'Сохранённых отметок пока нет.'}</Text> : null}
       {loaded && more ? <Button secondary disabled={disabled} onPress={() => void loadMore()}>Показать ещё</Button> : null}
     </ScrollView>
-    <Modal visible={cameraOpen} animationType="slide" onRequestClose={() => setCameraOpen(false)}>
+    <Modal visible={cameraOpen} animationType="slide" onRequestClose={closeCamera}>
       <SafeAreaView style={styles.scanner}>
         <Text accessibilityRole="header" style={styles.title}>Сканирование QR</Text>
-        <Text style={styles.muted}>Наведите камеру на код на экране преподавателя.</Text>
-        {cameraOpen && foreground ? <CameraView style={styles.camera} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-          onBarcodeScanned={event => scan(event.data)} onMountError={() => {
-            setCameraOpen(false)
-            setError('Не удалось запустить камеру. Проверьте разрешение и повторите попытку.')
+        <Text style={styles.muted}>Наведите камеру на экран преподавателя. Поместите весь QR-код в кадр.</Text>
+        {cameraOpen && foreground ? <CameraView ref={camera} style={styles.camera} facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onCameraReady={() => setCameraReady(true)}
+          onBarcodeScanned={event => {
+            if (!scanPaused.current) void readQr(async () => [event])
+          }} onMountError={() => {
+            setCameraReady(false)
+            setScanError('Не удалось запустить камеру. Проверьте разрешение и повторите попытку.')
           }} /> : <View style={styles.camera} />}
-        <Button secondary onPress={() => setCameraOpen(false)}>Закрыть камеру</Button>
+        {scanStatus ? <Text accessibilityLiveRegion="polite" style={styles.muted}>{scanStatus}</Text> : null}
+        {scanError ? <Notice>{scanError}</Notice> : null}
+        {scanError && cameraReady ? <Button secondary onPress={() => {
+          scanPaused.current = false
+          setScanError('')
+        }}>Сканировать снова</Button> : null}
+        <Button disabled={!cameraReady || !foreground || !!scanStatus} onPress={() => void readQr(decodeFrame)}>Считать с кадра</Button>
+        <Button secondary disabled={!!scanStatus} onPress={closeCamera}>Закрыть камеру</Button>
       </SafeAreaView>
     </Modal>
   </>

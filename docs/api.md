@@ -11,7 +11,8 @@
 | POST /sessions | Преподаватель | `schedule_id`, `ttl_minutes`, `late_after_minutes` | 201 при создании, текущая сессия при повторе |
 | GET /sessions/{id} | Владелец | — | Сессия с `qr_image` в PNG data URI, когда регистрация открыта |
 | PATCH /sessions/{id} | Владелец | `ttl_minutes` и/или `late_after_minutes`, либо `close: true` | Обновлённая сессия |
-| GET /sessions/{id}/attendance | Владелец | Пагинация | Отметки с именами студентов |
+| GET /sessions/{id}/attendance | Владелец | Пагинация | Отметки с именами, идентификаторами студентов и признаком `has_location` |
+| GET /sessions/{id}/attendance/{student_id}/location | Владелец | — | Координаты, погрешность в метрах и название корпуса. 404, если точка отсутствует |
 | POST /attendance/qr | Студент | `token` | Отметка с временем, способом и статусом |
 | POST /attendance/geo | Студент | `schedule_id`, `latitude`, `longitude`, `horizontal_accuracy` (м) | Отметка с временем, способом и статусом |
 | GET /student/attendance | Студент | Пагинация | Личная история с названиями занятий |

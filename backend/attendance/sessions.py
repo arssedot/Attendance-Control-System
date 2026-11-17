@@ -9,7 +9,7 @@ from .config import MOSCOW
 from .db import Db, database_time
 from .domain import QrProof, qr_image, session_state, sign_qr, to_micros
 from .errors import fail, session_missing
-from .models import Lesson, RosterMark, SessionCreate, SessionPatch, SessionView
+from .models import Lesson, MarkLocation, RosterMark, SessionCreate, SessionPatch, SessionView
 
 router = APIRouter()
 SESSION_COLUMNS = "id, schedule_id, issued_at, expires_at, late_at, closed_at, qr_version"
@@ -162,10 +162,31 @@ def roster(session_id: UUID, user: Teacher, conn: Db, page: Page) -> list[Roster
     owned_session(session_id, user["id"], conn)
     rows = conn.execute(
         """
-        SELECT a.session_id, se.schedule_id, a.created_at, a.method, a.status, u.display_name AS student_name
+        SELECT a.session_id, se.schedule_id, a.created_at, a.method, a.status, a.student_id,
+               u.display_name AS student_name, geo.session_id IS NOT NULL AS has_location
         FROM attendance a JOIN users u ON u.id = a.student_id JOIN sessions se ON se.id = a.session_id
+        LEFT JOIN attendance_geolocations geo ON geo.session_id = a.session_id AND geo.student_id = a.student_id
         WHERE a.session_id = %s ORDER BY a.created_at, a.student_id LIMIT %s OFFSET %s
         """,
         (session_id, *page),
     ).fetchall()
     return [RosterMark.model_validate(row) for row in rows]
+
+
+@router.get("/sessions/{session_id}/attendance/{student_id}/location", tags=["sessions"])
+def mark_location(session_id: UUID, student_id: UUID, user: Teacher, conn: Db) -> MarkLocation:
+    owned_session(session_id, user["id"], conn)
+    row = conn.execute(
+        """
+        SELECT geo.latitude, geo.longitude, geo.horizontal_accuracy, b.name AS building_name
+        FROM attendance_geolocations geo
+        JOIN sessions se ON se.id = geo.session_id
+        JOIN schedule sc ON sc.id = se.schedule_id
+        JOIN buildings b ON b.id = sc.building_id
+        WHERE geo.session_id = %s AND geo.student_id = %s
+        """,
+        (session_id, student_id),
+    ).fetchone()
+    if row is None:
+        fail(404, "LOCATION_NOT_FOUND", "Для этой отметки координаты недоступны.")
+    return MarkLocation.model_validate(row)

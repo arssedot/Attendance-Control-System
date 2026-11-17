@@ -28,7 +28,9 @@ def database():
 @pytest.fixture
 def seeded_database(database):
     with psycopg.connect(database) as conn:
-        conn.execute("TRUNCATE auth_sessions, attendance, sessions, schedule, buildings, users, groups")
+        conn.execute(
+            "TRUNCATE auth_sessions, attendance_geolocations, attendance, sessions, schedule, buildings, users, groups"
+        )
         seed_demo(conn, PASSWORD)
         conn.execute(
             """

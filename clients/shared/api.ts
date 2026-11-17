@@ -50,7 +50,16 @@ export interface Mark {
 }
 
 export interface RosterMark extends Mark {
+  student_id: string
   student_name: string
+  has_location: boolean
+}
+
+export interface MarkLocation {
+  latitude: number
+  longitude: number
+  horizontal_accuracy: number
+  building_name: string
 }
 
 export interface HistoryMark extends Mark {

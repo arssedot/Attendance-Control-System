@@ -109,8 +109,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/readyz", include_in_schema=False)
     def ready(conn: Db) -> dict:
-        row = conn.execute("SELECT to_regclass('public.attendance') AS marks").fetchone()
-        if row["marks"] is None:
+        row = conn.execute(
+            """
+            SELECT to_regclass('public.attendance') IS NOT NULL
+                   AND to_regclass('public.attendance_geolocations') IS NOT NULL AS schema_exists
+            """
+        ).fetchone()
+        if not row["schema_exists"]:
             fail(503, "SCHEMA_UNAVAILABLE", "База данных ещё не готова.")
         return {"status": "ready"}
 
