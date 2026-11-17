@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Request-Id"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        if path.startswith("/api/") or path == "/":
+        if path.startswith("/api/") or path in ("/", "/check-in"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -131,6 +131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
 
         @app.get("/", include_in_schema=False)
+        @app.get("/check-in", include_in_schema=False)
         def frontend() -> FileResponse:
             return FileResponse(
                 settings.static_dir / "index.html",

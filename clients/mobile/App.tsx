@@ -10,8 +10,8 @@ import * as Location from 'expo-location'
 import { decode } from 'jpeg-js'
 import jsQR from 'jsqr'
 import {
-  ApiError, type HistoryMark, type Lesson, type Mark, type User,
-  methodLabel, moscowDate, readPage, statusLabel, timeLabel,
+  ApiError, type HistoryMark, type Lesson, type Mark, type QrPreview, type User,
+  attendanceQrToken, methodLabel, moscowDate, readPage, statusLabel, timeLabel,
 } from '@attendance/shared'
 import { authorized, restore, signIn, signOut } from './auth'
 
@@ -162,6 +162,20 @@ async function currentLocation() {
   }
 }
 
+async function locationProof() {
+  const permission = await Location.requestForegroundPermissionsAsync()
+  if (!permission.granted) {
+    if (!permission.canAskAgain) settingsPrompt('геолокации')
+    throw new Error('Для отметки разрешите доступ к геолокации.')
+  }
+  if (!(await Location.hasServicesEnabledAsync())) throw new Error('Включите геолокацию в настройках телефона.')
+  const { coords } = await currentLocation()
+  if (coords.accuracy === null || coords.accuracy <= 0) {
+    throw new Error('Телефон не сообщил точность координат. Повторите попытку.')
+  }
+  return { latitude: coords.latitude, longitude: coords.longitude, horizontal_accuracy: coords.accuracy }
+}
+
 function StudentHome({ user, onLogout, onExpired }: {
   user: User
   onLogout: () => Promise<void>
@@ -183,6 +197,7 @@ function StudentHome({ user, onLogout, onExpired }: {
   const [pictureSize, setPictureSize] = useState<string>()
   const [scanStatus, setScanStatus] = useState('')
   const [scanError, setScanError] = useState('')
+  const [checkIn, setCheckIn] = useState<{ token: string; lesson: QrPreview } | null>(null)
   const [cameraPermission, requestCamera] = useCameraPermissions()
   const [foreground, setForeground] = useState(AppState.currentState === 'active')
   const camera = useRef<CameraView>(null)
@@ -267,6 +282,7 @@ function StudentHome({ user, onLogout, onExpired }: {
       scanPaused.current = false
       setCameraReady(false)
       setScanError('')
+      setCheckIn(null)
       setCameraOpen(true)
     })
   }
@@ -284,15 +300,37 @@ function StudentHome({ user, onLogout, onExpired }: {
     setScanError('')
     setScanStatus('Считываем QR-код…')
     try {
-      const token = (await read())?.trim()
-      if (!token) throw new Error('QR-код не считался. Поднесите камеру ближе и попробуйте снова.')
-      setScanStatus('QR-код считан. Проверяем отметку…')
-      const result = await authorized<Mark>('/attendance/qr', { method: 'POST', body: { token } })
+      const code = await read()
+      if (!code) throw new Error('QR-код не считался. Поднесите камеру ближе и попробуйте снова.')
+      const token = attendanceQrToken(code)
+      if (!token) throw new Error('Это не QR-код Attendance. Сканируйте код с экрана преподавателя.')
+      setScanStatus('QR-код считан. Проверяем занятие…')
+      const lesson = await authorized<QrPreview>('/attendance/qr/preview', { method: 'POST', body: { token } })
       scannerActive.current = false
+      setCheckIn({ token, lesson })
+    } catch (cause) {
+      scanPaused.current = true
+      if (cause instanceof ApiError && cause.status === 401) onExpired(errorText(cause))
+      else setScanError(errorText(cause))
+    } finally {
+      scanning.current = false
+      setScanStatus('')
+    }
+  }
+
+  async function confirmQr() {
+    if (!checkIn || scanning.current) return
+    scanning.current = true
+    setScanError('')
+    setScanStatus('Проверяем присутствие…')
+    try {
+      const point = await locationProof()
+      const result = await authorized<Mark>('/attendance/qr', {
+        method: 'POST', body: { token: checkIn.token, ...point },
+      })
       setCameraOpen(false)
       saved(result)
     } catch (cause) {
-      scanPaused.current = true
       if (cause instanceof ApiError && cause.status === 401) onExpired(errorText(cause))
       else setScanError(errorText(cause))
     } finally {
@@ -316,50 +354,44 @@ function StudentHome({ user, onLogout, onExpired }: {
 
   async function decodeFrame(): Promise<string | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    let timedOut = false
-    const capture = camera.current?.takePictureAsync({ shutterSound: false }).then(picture => {
-      if (timedOut && picture) new File(picture.uri).delete()
-      return picture
-    })
-    const picture = await Promise.race([
-      capture,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          timedOut = true
-          reject(new Error('Камера не ответила. Закройте сканер и откройте его снова.'))
-        }, 8_000)
-      }),
-    ]).finally(() => clearTimeout(timer))
-    if (!picture) throw new Error('Не удалось получить кадр с камеры.')
-    const file = new File(picture.uri)
+    let ended = false
+    let file: File | undefined
+    async function captureAndRead() {
+      const picture = await camera.current?.takePictureAsync({ shutterSound: false })
+      if (!picture) throw new Error('Не удалось получить кадр с камеры.')
+      file = new File(picture.uri)
+      if (ended) {
+        if (file.exists) file.delete()
+        return
+      }
+      const bytes = await file.bytes()
+      if (ended) return
+      const frame = decode(bytes, { useTArray: true, maxResolutionInMP: 4, maxMemoryUsageInMB: 80 })
+      return jsQR(new Uint8ClampedArray(frame.data), frame.width, frame.height, { inversionAttempts: 'dontInvert' })?.data
+    }
+
     try {
-      const frame = decode(await file.bytes(), { useTArray: true, maxResolutionInMP: 4, maxMemoryUsageInMB: 80 })
-      return jsQR(new Uint8ClampedArray(frame.data), frame.width, frame.height)?.data
-    } catch {
-      throw new Error('Не удалось обработать кадр с камеры. Попробуйте сканировать снова.')
+      return await Promise.race([
+        captureAndRead().catch(() => {
+          throw new Error('Не удалось обработать кадр с камеры. Попробуйте сканировать снова.')
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Не удалось вовремя считать кадр. Попробуйте снова.')), 8_000)
+        }),
+      ])
     } finally {
-      if (file.exists) file.delete()
+      ended = true
+      clearTimeout(timer)
+      if (file?.exists) file.delete()
     }
   }
 
   function geo(lesson: Lesson) {
     return perform(async () => {
-      const permission = await Location.requestForegroundPermissionsAsync()
-      if (!permission.granted) {
-        if (!permission.canAskAgain) settingsPrompt('геолокации')
-        throw new Error('Для отметки разрешите доступ к геолокации.')
-      }
-      if (!(await Location.hasServicesEnabledAsync())) throw new Error('Включите геолокацию в настройках телефона.')
-      const { coords } = await currentLocation()
-      if (coords.accuracy === null || coords.accuracy <= 0) {
-        throw new Error('Телефон не сообщил точность координат. Повторите попытку.')
-      }
+      const point = await locationProof()
       saved(await authorized<Mark>('/attendance/geo', {
         method: 'POST',
-        body: {
-          schedule_id: lesson.id, latitude: coords.latitude, longitude: coords.longitude,
-          horizontal_accuracy: coords.accuracy,
-        },
+        body: { schedule_id: lesson.id, ...point },
       }))
     })
   }
@@ -437,6 +469,23 @@ function StudentHome({ user, onLogout, onExpired }: {
     </ScrollView>
     <Modal visible={cameraOpen} animationType="slide" onRequestClose={closeCamera}>
       <SafeAreaView style={styles.scanner}>
+        {checkIn ? <ScrollView contentContainerStyle={styles.content}>
+          <Text accessibilityRole="header" style={styles.title}>Подтверждение присутствия</Text>
+          <View style={styles.card}>
+            <Text style={styles.subject}>{checkIn.lesson.student_name}</Text>
+            <Text style={styles.subject}>{checkIn.lesson.subject}</Text>
+            <Text style={styles.muted}>{timeLabel(checkIn.lesson.starts_at)} · {checkIn.lesson.building_name} · ауд. {checkIn.lesson.room}</Text>
+          </View>
+          {checkIn.lesson.mark ? <Notice success>{`Отметка сохранена в ${timeLabel(checkIn.lesson.mark.created_at)} · ${statusLabel(checkIn.lesson.mark.status)}`}</Notice>
+            : <>
+              <Text style={styles.muted}>Приложение проверит, находится ли телефон в геозоне корпуса.</Text>
+              <Button disabled={!!scanStatus} onPress={() => void confirmQr()}>
+                {scanStatus || 'Подтвердить присутствие'}
+              </Button>
+            </>}
+          {scanError ? <Notice>{scanError}</Notice> : null}
+          <Button secondary disabled={!!scanStatus} onPress={closeCamera}>Закрыть</Button>
+        </ScrollView> : <>
         <Text accessibilityRole="header" style={styles.title}>Сканирование QR</Text>
         <Text style={styles.muted}>Наведите камеру на экран преподавателя. Поместите весь QR-код в кадр.</Text>
         {cameraOpen && foreground ? <CameraView ref={camera} style={styles.camera} facing="back"
@@ -455,6 +504,7 @@ function StudentHome({ user, onLogout, onExpired }: {
         }}>Сканировать снова</Button> : null}
         <Button disabled={!cameraReady || !foreground || !!scanStatus} onPress={() => void readQr(decodeFrame)}>Считать с кадра</Button>
         <Button secondary disabled={!!scanStatus} onPress={closeCamera}>Закрыть камеру</Button>
+        </>}
       </SafeAreaView>
     </Modal>
   </>

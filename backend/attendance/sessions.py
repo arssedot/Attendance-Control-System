@@ -30,7 +30,9 @@ def render_session(request: Request, row: dict, now: datetime) -> SessionView:
     image = None
     if state == "ACTIVE":
         proof = QrProof(row["id"], row["qr_version"], to_micros(row["issued_at"]), to_micros(row["expires_at"]))
-        image = qr_image(sign_qr(proof, request.app.state.settings.qr_key))
+        token = sign_qr(proof, request.app.state.settings.qr_key)
+        origin = request.app.state.settings.public_base_url or str(request.base_url).rstrip("/")
+        image = qr_image(f"{origin}/check-in#code={token}")
     return SessionView.model_validate({**row, "state": state, "qr_image": image, "server_time": now})
 
 

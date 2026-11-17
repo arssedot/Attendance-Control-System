@@ -82,15 +82,22 @@ class Lesson(BaseModel):
     marked: bool
 
 
-class QrMark(Input):
+class QrCode(Input):
     token: str = Field(min_length=1, max_length=1024)
 
 
-class GeoMark(Input):
-    schedule_id: UUID
+class Coordinates(Input):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     horizontal_accuracy: float = Field(gt=0, le=100_000)
+
+
+class QrMark(QrCode, Coordinates):
+    pass
+
+
+class GeoMark(Coordinates):
+    schedule_id: UUID
 
 
 class Mark(BaseModel):
@@ -99,6 +106,15 @@ class Mark(BaseModel):
     created_at: datetime
     method: Literal["QR", "GEO"]
     status: Literal["PRESENT", "LATE"]
+
+
+class QrPreview(BaseModel):
+    subject: str
+    student_name: str
+    building_name: str
+    room: str
+    starts_at: datetime
+    mark: Mark | None
 
 
 class RosterMark(Mark):

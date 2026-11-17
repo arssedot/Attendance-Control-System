@@ -49,6 +49,26 @@ export interface Mark {
   status: 'PRESENT' | 'LATE'
 }
 
+export interface Coordinates {
+  latitude: number
+  longitude: number
+  horizontal_accuracy: number
+}
+
+export interface QrPreview {
+  subject: string
+  student_name: string
+  building_name: string
+  room: string
+  starts_at: string
+  mark: Mark | null
+}
+
+export function attendanceQrToken(value: string): string | undefined {
+  const code = value.trim().match(/^https:\/\/[^/?#]+\/check-in#code=([\w-]+)$/i)?.[1] ?? value.trim()
+  return /^[A-Za-z0-9_-]{100,200}$/.test(code) ? code : undefined
+}
+
 export interface RosterMark extends Mark {
   student_id: string
   student_name: string

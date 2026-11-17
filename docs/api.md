@@ -13,7 +13,8 @@
 | PATCH /sessions/{id} | Владелец | `ttl_minutes` и/или `late_after_minutes`, либо `close: true` | Обновлённая сессия |
 | GET /sessions/{id}/attendance | Владелец | Пагинация | Отметки с именами, идентификаторами студентов и признаком `has_location` |
 | GET /sessions/{id}/attendance/{student_id}/location | Владелец | — | Координаты, погрешность в метрах и название корпуса. 404, если точка отсутствует |
-| POST /attendance/qr | Студент | `token` | Отметка с временем, способом и статусом |
+| POST /attendance/qr/preview | Студент | `token` | Имя авторизованного студента, занятие и уже сохранённая отметка при наличии |
+| POST /attendance/qr | Студент | `token`, `latitude`, `longitude`, `horizontal_accuracy` (м) | Подтверждённая отметка после проверки QR и геозоны |
 | POST /attendance/geo | Студент | `schedule_id`, `latitude`, `longitude`, `horizontal_accuracy` (м) | Отметка с временем, способом и статусом |
 | GET /student/attendance | Студент | Пагинация | Личная история с названиями занятий |
 

@@ -117,8 +117,8 @@ def login(payload: Login, request: Request, response: Response, conn: Db) -> Tok
         row = None
     if row is None:
         fail(401, "INVALID_CREDENTIALS", "Проверьте логин и пароль.")
-    if (payload.client == "web") != (row["role"] == "ROLE_TEACHER"):
-        fail(403, "CLIENT_FORBIDDEN", "Преподаватель входит через веб, студент — через приложение.")
+    if payload.client == "mobile" and row["role"] != "ROLE_STUDENT":
+        fail(403, "CLIENT_FORBIDDEN", "В мобильное приложение входит студент.")
     now = datetime.now(UTC)
     conn.execute("DELETE FROM auth_sessions WHERE expires_at <= %s", (now,))
     row.update(auth_id=uuid4(), refresh_id=uuid4(), client=payload.client, expires_at=now + REFRESH_LIFETIME)

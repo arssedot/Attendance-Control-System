@@ -21,6 +21,8 @@ curl --cacert attendance-local.crt https://localhost/readyz
 
 Для размещения на сервере укажите домен в `ATTENDANCE_HOST`, задайте `BIND_ADDRESS=0.0.0.0` и направьте DNS-запись на сервер. Caddy получит публичный сертификат при доступных 80 и 443. Запускайте загрузку `seed` только в изолированной учебной среде. Опубликованный образ можно развернуть через `ATTENDANCE_IMAGE=ghcr.io/arssedot/attendance-control-system:<тег>` и `docker compose up --no-build -d --wait` после `docker compose pull app`.
 
+QR-ссылка использует HTTPS-адрес, с которого преподаватель открыл кабинет. Этот адрес должен быть доступен с телефона. Если внешний адрес отличается, задайте его явно через `PUBLIC_BASE_URL`, например `https://attendance.example.org`. Адрес `localhost` в QR подходит для проверки с того же компьютера или с эмулятора, подключённого через ADB.
+
 Установите зависимости через `npm ci`. Скопируйте `clients/mobile/.env.example` в `clients/mobile/.env` и задайте `EXPO_PUBLIC_API_URL` равным HTTPS-адресу сервера. Переменная входит в клиентскую сборку и предназначена для публичного адреса. Команды запуска генерируют системные проекты из конфигурации Expo.
 
 ```sh

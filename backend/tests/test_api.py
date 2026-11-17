@@ -66,10 +66,19 @@ def test_qr_flow_is_idempotent_and_private(client, seeded_database):
     assert repeated.json()["id"] == session["id"]
     token = qr_token(seeded_database, session)
     route = f"{PREFIX}/attendance/qr"
-    assert_error(client.post(route, json={"token": token}, headers=outsider), 404, "SESSION_NOT_FOUND")
-    assert_error(client.post(route, json={"token": token}, headers=teacher), 403, "ROLE_FORBIDDEN")
-    first = client.post(route, json={"token": token}, headers=student)
-    second = client.post(route, json={"token": token}, headers=student)
+    payload = {"token": token, **GEO}
+    assert_error(client.post(route, json=payload, headers=outsider), 404, "SESSION_NOT_FOUND")
+    assert_error(client.post(route, json=payload, headers=teacher), 403, "ROLE_FORBIDDEN")
+    assert_error(client.post(route, json={"token": token}, headers=student), 422, "VALIDATION_ERROR")
+    assert_error(client.post(route, json={**payload, "student_id": str(uuid4())}, headers=student), 422, "VALIDATION_ERROR")
+    assert_error(client.post(route, json={**payload, "latitude": 56.30}, headers=student), 422, "GEO_OUTSIDE")
+    preview = client.post(route + "/preview", json={"token": token}, headers=student)
+    assert preview.status_code == 200
+    assert preview.json()["student_name"] == "Илья Соколов"
+    assert preview.json()["mark"] is None
+    assert client.get(f"{PREFIX}/student/attendance", headers=student).json() == []
+    first = client.post(route, json=payload, headers=student)
+    second = client.post(route, json=payload, headers=student)
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
     assert first.json()["status"] == "PRESENT"
@@ -149,18 +158,18 @@ def test_rotation_close_expiry_and_foreign_teacher(client, seeded_database):
     assert updated.json()["qr_image"] != session["qr_image"]
     assert datetime.fromisoformat(updated.json()["expires_at"]) > datetime.fromisoformat(session["expires_at"])
     route = f"{PREFIX}/attendance/qr"
-    assert_error(client.post(route, json={"token": original}, headers=student), 422, "QR_EXPIRED")
-    assert_error(client.post(route, json={"token": "invalid"}, headers=student), 422, "INVALID_QR")
+    assert_error(client.post(route, json={"token": original, **GEO}, headers=student), 422, "QR_EXPIRED")
+    assert_error(client.post(route, json={"token": "invalid", **GEO}, headers=student), 422, "INVALID_QR")
     with psycopg.connect(seeded_database) as conn:
         conn.execute(
             "UPDATE sessions SET issued_at = now() - interval '2 minutes', expires_at = now() - interval '1 minute' WHERE id = %s",
             (session["id"],),
         )
     assert client.get(path, headers=teacher).json()["state"] == "EXPIRED"
-    assert_error(client.post(route, json={"token": original}, headers=student), 409, "SESSION_EXPIRED")
+    assert_error(client.post(route, json={"token": original, **GEO}, headers=student), 409, "SESSION_EXPIRED")
     assert client.patch(path, json={"ttl_minutes": 5}, headers=teacher).json()["state"] == "ACTIVE"
     assert client.patch(path, json={"close": True}, headers=teacher).json()["state"] == "CLOSED"
-    assert_error(client.post(route, json={"token": original}, headers=student), 409, "SESSION_CLOSED")
+    assert_error(client.post(route, json={"token": original, **GEO}, headers=student), 409, "SESSION_CLOSED")
     assert_error(client.patch(path, json={"ttl_minutes": 10}, headers=teacher), 409, "SESSION_CLOSED")
     assert client.get(path + "/attendance", headers=teacher).json() == []
 
@@ -208,7 +217,7 @@ def test_concurrent_registration_preserves_all_distinct_students(client, seeded_
     ]
 
     def mark(student):
-        response = client.post(f"{PREFIX}/attendance/qr", json={"token": token}, headers=student)
+        response = client.post(f"{PREFIX}/attendance/qr", json={"token": token, **GEO}, headers=student)
         assert response.status_code == 200, response.text
         return response.json()
 

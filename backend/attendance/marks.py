@@ -6,7 +6,7 @@ from .auth import Student
 from .db import Db, database_time
 from .domain import QrProof, distance_m, read_qr, to_micros
 from .errors import fail, session_missing
-from .models import GeoMark, HistoryMark, Mark, QrMark
+from .models import Coordinates, GeoMark, HistoryMark, Mark, QrCode, QrMark, QrPreview
 from .sessions import Page
 
 router = APIRouter(tags=["attendance"])
@@ -20,23 +20,26 @@ def existing_mark(conn: Db, session_id: UUID, student_id: UUID) -> dict | None:
     ).fetchone()
 
 
-def register(conn: Db, user: dict, *, qr: QrProof | None = None, geo: GeoMark | None = None) -> Mark:
-    selector, target = ("se.id", qr.session_id) if qr else ("sc.id", geo.schedule_id)
+def student_session(conn: Db, user: dict, target: UUID, *, by_qr: bool, lock: bool = False) -> dict:
+    selector = "se.id" if by_qr else "sc.id"
+    locking = "FOR SHARE OF se" if lock else ""
     row = conn.execute(
         f"""
         SELECT se.id, se.schedule_id, se.issued_at, se.expires_at, se.late_at, se.closed_at, se.qr_version,
-               sc.starts_at, sc.ends_at, b.latitude, b.longitude, b.radius_m, b.max_accuracy_m
+               sc.subject, sc.room, sc.starts_at, sc.ends_at, b.name AS building_name,
+               b.latitude, b.longitude, b.radius_m, b.max_accuracy_m
         FROM sessions se
         JOIN schedule sc ON sc.id = se.schedule_id JOIN buildings b ON b.id = sc.building_id
-        WHERE {selector} = %s AND sc.group_id = %s FOR SHARE OF se
+        WHERE {selector} = %s AND sc.group_id = %s {locking}
         """,
         (target, user["group_id"]),
     ).fetchone()
     if row is None:
         session_missing()
-    previous = existing_mark(conn, row["id"], user["id"])
-    if previous:
-        return Mark.model_validate({**previous, "schedule_id": row["schedule_id"]})
+    return row
+
+
+def registration_time(conn: Db, row: dict, qr: QrProof | None):
     now = database_time(conn)
     if row["closed_at"] is not None:
         fail(409, "SESSION_CLOSED", "Преподаватель завершил регистрацию.")
@@ -49,12 +52,19 @@ def register(conn: Db, user: dict, *, qr: QrProof | None = None, geo: GeoMark | 
         or not qr.issued_us <= to_micros(now) < qr.expires_us
     ):
         fail(422, "QR_EXPIRED", "Сканируйте актуальный QR-код с экрана преподавателя.")
-    if geo:
-        if geo.horizontal_accuracy > row["max_accuracy_m"]:
-            fail(422, "GEO_INACCURATE", "Точность геолокации слишком низкая. Повторите попытку у окна.")
-        distance = distance_m(geo.latitude, geo.longitude, row["latitude"], row["longitude"])
-        if distance + geo.horizontal_accuracy > row["radius_m"]:
-            fail(422, "GEO_OUTSIDE", "Не удалось подтвердить ваше присутствие в геозоне корпуса.")
+    return now
+
+
+def register(conn: Db, user: dict, row: dict, point: Coordinates, qr: QrProof | None = None) -> Mark:
+    previous = existing_mark(conn, row["id"], user["id"])
+    if previous:
+        return Mark.model_validate({**previous, "schedule_id": row["schedule_id"]})
+    now = registration_time(conn, row, qr)
+    if point.horizontal_accuracy > row["max_accuracy_m"]:
+        fail(422, "GEO_INACCURATE", "Точность геолокации слишком низкая. Повторите попытку у окна.")
+    distance = distance_m(point.latitude, point.longitude, row["latitude"], row["longitude"])
+    if distance + point.horizontal_accuracy > row["radius_m"]:
+        fail(422, "GEO_OUTSIDE", "Не удалось подтвердить ваше присутствие в геозоне корпуса.")
     inserted = conn.execute(
         f"""
         INSERT INTO attendance (session_id, student_id, created_at, method, status)
@@ -63,30 +73,47 @@ def register(conn: Db, user: dict, *, qr: QrProof | None = None, geo: GeoMark | 
         """,
         (row["id"], user["id"], now, "QR" if qr else "GEO", "PRESENT" if now <= row["late_at"] else "LATE"),
     ).fetchone()
-    if inserted and geo:
+    if inserted and qr is None:
         conn.execute(
             """
             INSERT INTO attendance_geolocations (session_id, student_id, latitude, longitude, horizontal_accuracy)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (row["id"], user["id"], geo.latitude, geo.longitude, geo.horizontal_accuracy),
+            (row["id"], user["id"], point.latitude, point.longitude, point.horizontal_accuracy),
         )
     result = inserted or existing_mark(conn, row["id"], user["id"])
     return Mark.model_validate({**result, "schedule_id": row["schedule_id"]})
 
 
-@router.post("/attendance/qr")
-def mark_by_qr(payload: QrMark, request: Request, conn: Db, user: Student) -> Mark:
+def verify_qr(token: str, request: Request) -> QrProof:
     try:
-        proof = read_qr(payload.token, request.app.state.settings.qr_key)
+        return read_qr(token, request.app.state.settings.qr_key)
     except ValueError:
         fail(422, "INVALID_QR", "Это не QR-код Attendance. Сканируйте код занятия.")
-    return register(conn, user, qr=proof)
+
+
+@router.post("/attendance/qr/preview")
+def preview_qr(payload: QrCode, request: Request, conn: Db, user: Student) -> QrPreview:
+    proof = verify_qr(payload.token, request)
+    row = student_session(conn, user, proof.session_id, by_qr=True)
+    previous = existing_mark(conn, row["id"], user["id"])
+    if not previous:
+        registration_time(conn, row, proof)
+    mark = Mark.model_validate({**previous, "schedule_id": row["schedule_id"]}) if previous else None
+    return QrPreview.model_validate({**row, "student_name": user["display_name"], "mark": mark})
+
+
+@router.post("/attendance/qr")
+def mark_by_qr(payload: QrMark, request: Request, conn: Db, user: Student) -> Mark:
+    proof = verify_qr(payload.token, request)
+    row = student_session(conn, user, proof.session_id, by_qr=True, lock=True)
+    return register(conn, user, row, payload, qr=proof)
 
 
 @router.post("/attendance/geo")
 def mark_by_geo(payload: GeoMark, conn: Db, user: Student) -> Mark:
-    return register(conn, user, geo=payload)
+    row = student_session(conn, user, payload.schedule_id, by_qr=False, lock=True)
+    return register(conn, user, row, payload)
 
 
 @router.get("/student/attendance")

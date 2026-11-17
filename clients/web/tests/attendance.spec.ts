@@ -37,10 +37,37 @@ test('преподаватель открывает QR, студенты отм�
   expect(code?.data).toBeTruthy()
   await page.getByRole('button', { name: 'Закрыть показ' }).click()
 
-  const qrStudent = await student(request, 'student')
-  const qr = await request.post(`${api}/attendance/qr`, { headers: qrStudent, data: { token: code!.data } })
-  expect(qr.status()).toBe(200)
-  expect((await qr.json()).method).toBe('QR')
+  const link = new URL(code!.data)
+  expect(link.protocol).toBe('https:')
+  expect(link.pathname).toBe('/check-in')
+  expect(link.origin).toBe(new URL(page.url()).origin)
+  const studentContext = await page.context().browser()!.newContext({
+    ignoreHTTPSErrors: true,
+    geolocation: { latitude: 56.30, longitude: 43.9833, accuracy: 8 },
+    permissions: ['geolocation'],
+    viewport: { width: 390, height: 844 },
+  })
+  try {
+    const studentPage = await studentContext.newPage()
+    await studentPage.goto(link.href)
+    await expect(studentPage.getByRole('heading', { name: 'Подтверждение присутствия' })).toBeVisible()
+    await studentPage.getByLabel('Логин').fill('student')
+    await studentPage.getByLabel('Пароль').fill(password!)
+    await studentPage.getByRole('button', { name: 'Войти', exact: true }).click()
+    await expect(studentPage.getByText('Илья Соколов')).toBeVisible()
+    await expect(studentPage.getByRole('heading', { name: 'Объектно-ориентированное проектирование' })).toBeVisible()
+    const confirm = studentPage.getByRole('button', { name: 'Подтвердить присутствие' })
+    await confirm.click()
+    await expect(studentPage.getByRole('alert')).toContainText('геозоне корпуса')
+    await studentContext.setGeolocation({ latitude: 56.2955, longitude: 43.9833, accuracy: 8 })
+    await confirm.click()
+    await expect(studentPage.getByRole('status')).toContainText('Отметка сохранена')
+    if (process.env.QA_SCREENSHOTS) {
+      await studentPage.screenshot({ path: 'test-results/student-check-in.png', fullPage: true })
+    }
+  } finally {
+    await studentContext.close()
+  }
   const geoStudent = await student(request, 'student2')
   const schedule = await request.get(`${api}/schedule`, { headers: geoStudent })
   expect(schedule.status()).toBe(200)

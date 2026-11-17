@@ -1,7 +1,7 @@
 {$ATTENDANCE_HOST:localhost} {
     header {
         X-Frame-Options DENY
-        Permissions-Policy "camera=(), geolocation=(), microphone=()"
+        Permissions-Policy "camera=(), geolocation=(self), microphone=()"
         -Server
     }
     request_body {

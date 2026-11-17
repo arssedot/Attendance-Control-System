@@ -53,7 +53,7 @@ export default function App() {
   </label>
 
   if (loading) return <main className="boot" aria-busy="true"><Brand /><p>Подключение…</p></main>
-  if (user) return <Dashboard key={user.id} user={user} themeControl={themeControl} onLogout={async () => {
+  if (user?.role === 'ROLE_TEACHER') return <Dashboard key={user.id} user={user} themeControl={themeControl} onLogout={async () => {
     await logout()
     setUser(null)
   }} />
@@ -75,7 +75,11 @@ function LoginPage({ initialMessage, themeControl, onLogin }: {
     setBusy(true)
     setError('')
     try {
-      onLogin((await login(String(form.get('login')), String(form.get('password')))).user)
+      const result = await login(String(form.get('login')), String(form.get('password')))
+      if (result.user.role !== 'ROLE_TEACHER') {
+        throw new Error('Для кабинета преподавателя нужна учётная запись преподавателя.')
+      }
+      onLogin(result.user)
     } catch (cause) {
       setError(messageOf(cause))
     } finally {

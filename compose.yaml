@@ -55,6 +55,7 @@ services:
       DATABASE_URL: *database-url
       AUTH_KEY: ${AUTH_KEY:?Run python ops/init_env.py}
       QR_KEY: ${QR_KEY:?Run python ops/init_env.py}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       FORWARDED_ALLOW_IPS: ${PROXY_ADDRESS:-172.28.108.2}
     depends_on:
       migrate:
