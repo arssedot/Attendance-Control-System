@@ -1,0 +1,8 @@
+INSERT INTO groups (id, name) VALUES
+    ('10000000-0000-0000-0000-000000000001', 'ИВТ-301'),
+    ('10000000-0000-0000-0000-000000000002', 'ИВТ-302')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO buildings (id, name, latitude, longitude, radius_m, max_accuracy_m) VALUES
+    ('30000000-0000-0000-0000-000000000001', 'Учебный корпус 1', 56.2955, 43.9833, 120, 50)
+ON CONFLICT DO NOTHING;
