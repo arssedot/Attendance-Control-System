@@ -200,7 +200,7 @@ th { color: var(--muted); background: var(--surface-soft); font-size: .79rem; }
 }
 @media (max-width: 680px) {
   .dashboard-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: none; }
-  .dashboard-grid > * { grid-area: auto; }
+  .dashboard-grid > .panel, .dashboard-grid > .side-panel { grid-area: auto; }
   .sidebar { flex-wrap: wrap; }
   .sidebar nav { order: 1; width: 100%; }
   .user-name, .topbar-label, .theme-control > svg { display: none; }

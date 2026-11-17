@@ -59,11 +59,13 @@ test('преподаватель открывает QR, студенты отм�
   if (process.env.QA_SCREENSHOTS) {
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.screenshot({ path: 'test-results/attendance-desktop.png', fullPage: true })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: 'test-results/attendance-mobile-web.png', fullPage: true })
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
-    await page.setViewportSize({ width: 1280, height: 720 })
   }
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+  if (process.env.QA_SCREENSHOTS) {
+    await page.screenshot({ path: 'test-results/attendance-mobile-web.png', fullPage: true })
+  }
+  await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByLabel('Регистрация, мин.').fill('15')
   await page.getByRole('button', { name: 'Обновить срок и QR-код' }).click()
   await expect(page.getByRole('button', { name: 'Обновить срок и QR-код' })).toBeEnabled()
