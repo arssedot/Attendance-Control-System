@@ -30,6 +30,8 @@ npm run ios --workspace @attendance/mobile
 
 Для Android нужны Android SDK и JDK, для iOS — macOS и Xcode. Совместимые версии SDK описаны в документации [Expo SDK 58](https://expo.dev/changelog/sdk-58). Для проверки сборки JS выполните `npm run export --workspace @attendance/mobile`.
 
+Для Android-сборки на Windows используйте короткий путь к рабочей копии, если Ninja сообщает об ограничении длины пути. Expo-конфигурация задаёт предел для путей объектных файлов CMake, чтобы CMake автоматически сокращал длинные имена.
+
 В Android-эмуляторе доступ к локальному серверу можно проверить через `adb reverse tcp:443 tcp:443`. Перед `expo prebuild --platform android` укажите `ATTENDANCE_ANDROID_DEBUG_CA` как абсолютный путь к корневому сертификату Caddy и `EXPO_PUBLIC_API_URL=https://localhost`. Сгенерированное правило доверия действует для `localhost` в Android debug-сборке.
 
 ## Резервная копия и восстановление

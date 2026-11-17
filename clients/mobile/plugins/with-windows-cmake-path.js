@@ -3,7 +3,7 @@ const { withAppBuildGradle } = require('expo/config-plugins')
 module.exports = config => {
   if (process.platform !== 'win32') return config
   return withAppBuildGradle(config, mod => {
-    const argument = '-DCMAKE_OBJECT_PATH_MAX=200'
+    const argument = '-DCMAKE_OBJECT_PATH_MAX=248'
     const contents = mod.modResults.contents
     if (contents.includes(argument)) return mod
     if (mod.modResults.language !== 'groovy' || !contents.includes('    defaultConfig {')) {
