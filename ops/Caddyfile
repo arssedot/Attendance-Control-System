@@ -1,0 +1,11 @@
+{$ATTENDANCE_HOST:localhost} {
+    header {
+        X-Frame-Options DENY
+        Permissions-Policy "camera=(), geolocation=(), microphone=()"
+        -Server
+    }
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy app:8000
+}

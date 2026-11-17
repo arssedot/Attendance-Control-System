@@ -1,0 +1,112 @@
+name: attendance
+
+x-backend: &backend
+  image: ${ATTENDANCE_IMAGE:-attendance:local}
+  build: .
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-database-url: &database-url
+  postgresql://attendance:${POSTGRES_PASSWORD:?Run python ops/init_env.py}@db:5432/attendance
+
+services:
+  db:
+    image: postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: attendance
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Run python ops/init_env.py}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_PASSWORD:?Run python ops/init_env.py}
+    volumes:
+      - db-data:/var/lib/postgresql
+      - ./ops/db-init/001-role.sh:/docker-entrypoint-initdb.d/001-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d attendance"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - data
+
+  migrate:
+    <<: *backend
+    command: ["python", "-m", "attendance.manage", "migrate"]
+    healthcheck:
+      disable: true
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+
+  app:
+    <<: *backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: *database-url
+      AUTH_KEY: ${AUTH_KEY:?Run python ops/init_env.py}
+      QR_KEY: ${QR_KEY:?Run python ops/init_env.py}
+      FORWARDED_ALLOW_IPS: ${PROXY_ADDRESS:-172.28.108.2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - data
+      - proxy
+
+  caddy:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    environment:
+      ATTENDANCE_HOST: ${ATTENDANCE_HOST:-localhost}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-80}:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      proxy:
+        ipv4_address: ${PROXY_ADDRESS:-172.28.108.2}
+
+  seed:
+    <<: *backend
+    profiles: [demo]
+    command: ["python", "-m", "attendance.manage", "seed-demo"]
+    healthcheck:
+      disable: true
+    environment:
+      DATABASE_URL: *database-url
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - data
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  data:
+    internal: true
+  proxy:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.28.108.0/28}
+          ip_range: ${PROXY_IP_RANGE:-172.28.108.8/29}
