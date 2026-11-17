@@ -4,9 +4,11 @@ import {
   StatusBar, StyleSheet, Text, TextInput, View,
 } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
-import { CameraView, scanFromURLAsync, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File } from 'expo-file-system'
 import * as Location from 'expo-location'
+import { decode } from 'jpeg-js'
+import jsQR from 'jsqr'
 import {
   ApiError, type HistoryMark, type Lesson, type Mark, type User,
   methodLabel, moscowDate, readPage, statusLabel, timeLabel,
@@ -178,6 +180,7 @@ function StudentHome({ user, onLogout, onExpired }: {
   const [busy, setBusy] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
+  const [pictureSize, setPictureSize] = useState<string>()
   const [scanStatus, setScanStatus] = useState('')
   const [scanError, setScanError] = useState('')
   const [cameraPermission, requestCamera] = useCameraPermissions()
@@ -274,15 +277,14 @@ function StudentHome({ user, onLogout, onExpired }: {
     setCameraOpen(false)
   }
 
-  async function readQr(decode: () => Promise<BarcodeScanningResult[]>) {
+  async function readQr(read: () => Promise<string | undefined>) {
     if (!scannerActive.current || scanning.current) return
     scanning.current = true
     scanPaused.current = false
     setScanError('')
     setScanStatus('Считываем QR-код…')
     try {
-      const [code] = await decode()
-      const token = (code?.raw && code.raw !== 'null' ? code.raw : code?.data)?.trim()
+      const token = (await read())?.trim()
       if (!token) throw new Error('QR-код не считался. Поднесите камеру ближе и попробуйте снова.')
       setScanStatus('QR-код считан. Проверяем отметку…')
       const result = await authorized<Mark>('/attendance/qr', { method: 'POST', body: { token } })
@@ -299,12 +301,42 @@ function StudentHome({ user, onLogout, onExpired }: {
     }
   }
 
-  async function decodeFrame(): Promise<BarcodeScanningResult[]> {
-    const picture = await camera.current?.takePictureAsync({ shutterSound: false })
+  function onCameraReady() {
+    setCameraReady(true)
+    if (pictureSize) return
+    void camera.current?.getAvailablePictureSizesAsync().then(sizes => {
+      const supported = sizes.map(size => {
+        const [width = 0, height = 0] = size.split('x').map(Number)
+        return { size, pixels: width * height }
+      }).filter(size => size.pixels > 0)
+        .sort((a, b) => Math.abs(a.pixels - 1_200_000) - Math.abs(b.pixels - 1_200_000))
+      setPictureSize(supported[0]?.size)
+    }).catch(() => {})
+  }
+
+  async function decodeFrame(): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let timedOut = false
+    const capture = camera.current?.takePictureAsync({ shutterSound: false }).then(picture => {
+      if (timedOut && picture) new File(picture.uri).delete()
+      return picture
+    })
+    const picture = await Promise.race([
+      capture,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true
+          reject(new Error('Камера не ответила. Закройте сканер и откройте его снова.'))
+        }, 8_000)
+      }),
+    ]).finally(() => clearTimeout(timer))
     if (!picture) throw new Error('Не удалось получить кадр с камеры.')
     const file = new File(picture.uri)
     try {
-      return await scanFromURLAsync(file.uri, ['qr'])
+      const frame = decode(await file.bytes(), { useTArray: true, maxResolutionInMP: 4, maxMemoryUsageInMB: 80 })
+      return jsQR(new Uint8ClampedArray(frame.data), frame.width, frame.height)?.data
+    } catch {
+      throw new Error('Не удалось обработать кадр с камеры. Попробуйте сканировать снова.')
     } finally {
       if (file.exists) file.delete()
     }
@@ -408,9 +440,9 @@ function StudentHome({ user, onLogout, onExpired }: {
         <Text accessibilityRole="header" style={styles.title}>Сканирование QR</Text>
         <Text style={styles.muted}>Наведите камеру на экран преподавателя. Поместите весь QR-код в кадр.</Text>
         {cameraOpen && foreground ? <CameraView ref={camera} style={styles.camera} facing="back"
-          barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onCameraReady={() => setCameraReady(true)}
+          pictureSize={pictureSize} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onCameraReady={onCameraReady}
           onBarcodeScanned={event => {
-            if (!scanPaused.current) void readQr(async () => [event])
+            if (!scanPaused.current) void readQr(async () => event.raw && event.raw !== 'null' ? event.raw : event.data)
           }} onMountError={() => {
             setCameraReady(false)
             setScanError('Не удалось запустить камеру. Проверьте разрешение и повторите попытку.')
