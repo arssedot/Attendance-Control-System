@@ -144,7 +144,12 @@ async function currentLocation() {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        mayShowUserSettingsDialog: false,
+      }).catch(() => {
+        throw new Error('Не удалось получить геопозицию. Проверьте настройки телефона и повторите попытку.')
+      }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Телефон не смог определить координаты. Повторите попытку.')), 15_000)
       }),
