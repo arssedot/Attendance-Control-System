@@ -1,0 +1,6 @@
+{
+  "name": "attendance",
+  "private": true,
+  "workspaces": ["clients/web", "clients/mobile", "clients/shared"],
+  "engines": { "node": ">=22.13" }
+}
