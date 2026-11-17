@@ -35,6 +35,8 @@ docker compose run --rm --no-deps seed
 
 ![Расписание, открытая QR-сессия и отметки студентов в кабинете преподавателя](docs/screenshots/teacher-dashboard.png)
 
+<img src="docs/screenshots/teacher-mark-location.png" alt="Широта, долгота и погрешность геоотметки в кабинете преподавателя" width="420" />
+
 ### Приложение студента
 
 <img src="docs/screenshots/student-qr-scanner.png" alt="Экран сканирования QR-кода в Android-приложении Attendance" width="320" />
