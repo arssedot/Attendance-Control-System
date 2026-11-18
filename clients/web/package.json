@@ -1,0 +1,26 @@
+{
+  "name": "@attendance/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@attendance/shared": "1.0.0",
+    "lucide-react": "0.468.0",
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "22.15.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "jsqr": "1.4.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.8"
+  }
+}

@@ -1,0 +1,112 @@
+name: Проверка Attendance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
+        env:
+          POSTGRES_DB: attendance_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d attendance_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/attendance_test
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: python -m pip install -r backend/requirements-test.txt
+      - run: python -m ruff check backend ops
+      - run: python -m pytest backend -q
+
+  clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Аудит зависимостей npm
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/npm-audit.json"
+          npm audit --omit=dev --json > "$report" || true
+          node --input-type=module - "$report" <<'JS'
+          import { readFileSync } from 'node:fs'
+          const report = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+          if (!report.vulnerabilities) throw new Error('npm audit did not return a vulnerability report')
+          const advisories = Object.values(report.vulnerabilities).flatMap(item => item.via)
+            .filter(item => typeof item === 'object')
+          const accepted = 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf'
+          for (const item of advisories) console.log(item.severity, item.name, item.url)
+          const blocked = advisories.some(item =>
+            ['high', 'critical'].includes(item.severity) && item.url !== accepted)
+          if (blocked) process.exitCode = 1
+          JS
+      - run: npm run check --workspace @attendance/mobile
+      - run: npm run export --workspace @attendance/mobile
+        env:
+          EXPO_PUBLIC_API_URL: https://attendance.example.org
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          python ops/init_env.py
+          docker compose build app
+          docker compose up --no-build -d --wait --wait-timeout 120
+          docker compose run --rm --no-deps seed
+      - name: Браузер, отметки и восстановление PostgreSQL
+        shell: bash
+        run: |
+          password="$(sed -n 's/^DEMO_PASSWORD=//p' .env)"
+          echo "::add-mask::$password"
+          DEMO_PASSWORD="$password" npm run test:e2e --workspace @attendance/web
+          python ops/backup.py verify "$(python ops/backup.py create)"
+      - if: failure()
+        run: docker compose logs --tail=50
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [api, clients]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Опубликовать проверенный контейнер
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$image:$GITHUB_SHA" .
+          docker push "$image:$GITHUB_SHA"
+          tag=main
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then tag="$GITHUB_REF_NAME"; fi
+          docker tag "$image:$GITHUB_SHA" "$image:$tag"
+          docker push "$image:$tag"

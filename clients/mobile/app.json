@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Attendance",
+    "slug": "attendance-student",
+    "version": "1.0.0",
+    "scheme": "attendance",
+    "platforms": ["android", "ios"],
+    "orientation": "portrait",
+    "ios": { "bundleIdentifier": "ru.attendance.student" },
+    "android": { "package": "ru.attendance.student" },
+    "plugins": [
+      ["expo-camera", {
+        "cameraPermission": "Разрешите Attendance сканировать QR-код занятия.",
+        "recordAudioAndroid": false,
+        "barcodeScannerEnabled": true
+      }],
+      ["expo-location", {
+        "locationWhenInUsePermission": "Разрешите Attendance проверить геозону корпуса при отметке."
+      }],
+      "expo-secure-store"
+    ]
+  }
+}

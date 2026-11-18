@@ -1,0 +1,57 @@
+@startuml attendance_components
+skinparam componentStyle uml2
+actor "Преподаватель" as Teacher
+actor "Студент" as Student
+component "React · Веб-кабинет" as Web
+component "React Native · Приложение" as Mobile
+component "Caddy · HTTPS" as Proxy
+package "FastAPI" {
+  component "Аутентификация и роли" as Auth
+  component "Расписание и сессии" as Sessions
+  component "QR и геопроверка" as Marks
+  component "Psycopg pool" as Db
+}
+database "PostgreSQL" as Pg
+Teacher --> Web
+Student --> Mobile
+Web --> Proxy
+Mobile --> Proxy
+Proxy --> Auth
+Proxy --> Sessions
+Proxy --> Marks
+Sessions ..> Auth : проверка роли
+Marks ..> Auth : проверка роли и группы
+Auth --> Db
+Sessions --> Db
+Marks --> Db
+Db --> Pg
+@enduml
+
+@startuml attendance_use_cases
+left to right direction
+actor "Преподаватель" as Teacher
+actor "Студент" as Student
+rectangle "Attendance" {
+  usecase "Войти" as Login
+  usecase "Выбрать занятие" as Schedule
+  usecase "Открыть сессию и показать QR" as Open
+  usecase "Изменить срок или закрыть сессию" as Change
+  usecase "Посмотреть отметки группы" as Roster
+  usecase "Отметиться по QR" as Qr
+  usecase "Отметиться по геолокации" as Geo
+  usecase "Посмотреть личную историю" as History
+  usecase "Проверить расписание, группу и время сервера" as Verify
+}
+Teacher --> Login
+Teacher --> Schedule
+Teacher --> Open
+Teacher --> Change
+Teacher --> Roster
+Student --> Login
+Student --> Schedule
+Student --> Qr
+Student --> Geo
+Student --> History
+Qr ..> Verify : <<include>>
+Geo ..> Verify : <<include>>
+@enduml
