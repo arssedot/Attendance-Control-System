@@ -88,7 +88,12 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "attendance.unn_sync", "worker", "--interval", "${UNN_SYNC_INTERVAL:-1800}"]
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import os, psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=2).close()"]
+      interval: 20s
+      timeout: 4s
+      start_interval: 2s
+      start_period: 10s
+      retries: 3
     environment:
       DATABASE_URL: *database-url
     depends_on:
