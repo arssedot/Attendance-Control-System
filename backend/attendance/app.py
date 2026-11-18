@@ -112,7 +112,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         row = conn.execute(
             """
             SELECT to_regclass('public.attendance') IS NOT NULL
-                   AND to_regclass('public.attendance_geolocations') IS NOT NULL AS schema_exists
+                   AND to_regclass('public.attendance_geolocations') IS NOT NULL
+                   AND EXISTS (
+                       SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = 'public' AND table_name = 'schedule' AND column_name = 'unn_event_id'
+                   ) AS schema_exists
             """
         ).fetchone()
         if not row["schema_exists"]:

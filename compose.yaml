@@ -83,6 +83,26 @@ services:
       proxy:
         ipv4_address: ${PROXY_ADDRESS:-172.28.108.2}
 
+  unn-sync:
+    <<: *backend
+    restart: unless-stopped
+    command: ["python", "-m", "attendance.unn_sync", "worker", "--interval", "${UNN_SYNC_INTERVAL:-1800}"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=2).close()"]
+      interval: 20s
+      timeout: 4s
+      start_interval: 2s
+      start_period: 10s
+      retries: 3
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - data
+      - unn_egress
+
   seed:
     <<: *backend
     profiles: [demo]
@@ -106,6 +126,7 @@ volumes:
 networks:
   data:
     internal: true
+  unn_egress:
   proxy:
     ipam:
       config:
