@@ -80,6 +80,8 @@ class Lesson(BaseModel):
     session_id: UUID | None
     session_state: SessionState | None
     marked: bool
+    source: Literal["LOCAL", "UNN"]
+    geozone_configured: bool
 
 
 class QrCode(Input):

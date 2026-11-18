@@ -27,6 +27,8 @@ export interface Lesson {
   session_id: string | null
   session_state: SessionState | null
   marked: boolean
+  source: 'LOCAL' | 'UNN'
+  geozone_configured: boolean
 }
 
 export interface Session {

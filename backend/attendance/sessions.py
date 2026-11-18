@@ -52,15 +52,20 @@ def schedule(
     rows = conn.execute(
         f"""
         SELECT sc.id, sc.subject, sc.room, sc.starts_at, sc.ends_at,
-               b.name AS building_name, g.name AS group_name, u.display_name AS teacher_name,
+               COALESCE(NULLIF(sc.unn_building_name, ''), b.name, 'Место не указано') AS building_name,
+               COALESCE(g.unn_code, g.name) AS group_name,
+               COALESCE(NULLIF(sc.unn_teacher_name, ''), u.display_name, 'Преподаватель не указан') AS teacher_name,
+               CASE WHEN sc.unn_event_id IS NULL THEN 'LOCAL' ELSE 'UNN' END AS source,
+               sc.building_id IS NOT NULL AS geozone_configured,
                se.id AS session_id, se.expires_at, se.closed_at, a.student_id IS NOT NULL AS marked
         FROM schedule sc
-        JOIN buildings b ON b.id = sc.building_id
+        LEFT JOIN buildings b ON b.id = sc.building_id
         JOIN groups g ON g.id = sc.group_id
-        JOIN users u ON u.id = sc.teacher_id
+        LEFT JOIN users u ON u.id = sc.teacher_id
         LEFT JOIN sessions se ON se.schedule_id = sc.id
         LEFT JOIN attendance a ON a.session_id = se.id AND a.student_id = %s
         WHERE {owner_column} = %s AND sc.starts_at >= %s AND sc.starts_at < %s
+          AND NOT sc.unn_cancelled AND (g.unn_id IS NULL OR sc.unn_event_id IS NOT NULL OR se.id IS NOT NULL)
         ORDER BY sc.starts_at, sc.id LIMIT %s OFFSET %s
         """,
         (user["id"], owner_id, start, end, *page),
@@ -77,7 +82,11 @@ def open_session(
     payload: SessionCreate, user: Teacher, conn: Db, request: Request, response: Response,
 ) -> SessionView:
     lesson = conn.execute(
-        "SELECT starts_at, ends_at FROM schedule WHERE id = %s AND teacher_id = %s FOR UPDATE",
+        """
+        SELECT sc.starts_at, sc.ends_at, sc.building_id, sc.unn_event_id, sc.unn_cancelled, g.unn_id
+        FROM schedule sc JOIN groups g ON g.id = sc.group_id
+        WHERE sc.id = %s AND sc.teacher_id = %s FOR UPDATE OF sc
+        """,
         (payload.schedule_id, user["id"]),
     ).fetchone()
     if lesson is None:
@@ -89,6 +98,10 @@ def open_session(
     if existing:
         response.status_code = 200
         return render_session(request, existing, now)
+    if lesson["unn_cancelled"] or (lesson["unn_id"] is not None and lesson["unn_event_id"] is None):
+        fail(409, "SCHEDULE_UNAVAILABLE", "Занятие отсутствует в текущем расписании.")
+    if lesson["building_id"] is None:
+        fail(409, "GEOZONE_UNCONFIGURED", "Для корпуса занятия ещё не настроена геозона.")
     if not lesson["starts_at"] <= now < lesson["ends_at"]:
         fail(409, "OUTSIDE_LESSON", "Регистрацию можно открыть во время занятия.")
     row = conn.execute(

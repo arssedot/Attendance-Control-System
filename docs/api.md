@@ -7,7 +7,7 @@
 | POST /auth/login | Все | `login`, `password`, `client` (web или mobile) | `user`, `access_token`, `expires_in`, refresh в cookie или `refresh_token` |
 | POST /auth/refresh | Refresh JWT | `refresh_token` для mobile, пустой объект для web | Новая пара JWT по правилам выбранного клиента |
 | POST /auth/logout | Refresh JWT | Тот же формат, что для refresh | 204, отзыв сессии входа |
-| GET /schedule | Обе роли | `date` (день по Москве, по умолчанию сегодня), пагинация | Занятия роли с идентификатором и состоянием сессии |
+| GET /schedule | Обе роли | `date` (день по Москве, по умолчанию сегодня), пагинация | Занятия роли, поля `source` (`UNN` или `LOCAL`), `geozone_configured` и состояние сессии |
 | POST /sessions | Преподаватель | `schedule_id`, `ttl_minutes`, `late_after_minutes` | 201 при создании, текущая сессия при повторе |
 | GET /sessions/{id} | Владелец | — | Сессия с `qr_image` в PNG data URI, когда регистрация открыта |
 | PATCH /sessions/{id} | Владелец | `ttl_minutes` и/или `late_after_minutes`, либо `close: true` | Обновлённая сессия |

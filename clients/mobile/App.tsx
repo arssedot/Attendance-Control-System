@@ -448,14 +448,15 @@ function StudentHome({ user, onLogout, onExpired }: {
       {loaded && screen === 'schedule' && lessons.map(lesson => <View key={lesson.id} style={styles.card}>
         <Text style={styles.lessonTime}>{timeLabel(lesson.starts_at)}–{timeLabel(lesson.ends_at)}</Text>
         <Text style={styles.subject}>{lesson.subject}</Text>
-        <Text style={styles.muted}>{lesson.building_name} · ауд. {lesson.room}</Text>
+        <Text style={styles.muted}>{lesson.building_name}{lesson.room === '—' ? '' : ` · ауд. ${lesson.room}`}</Text>
         <Text style={styles.muted}>{lesson.teacher_name}</Text>
         {lesson.marked ? <Text style={styles.marked}>Отметка сохранена</Text>
           : lesson.session_state === 'ACTIVE' ? <>
             <Button secondary disabled={disabled} onPress={() => void geo(lesson)}>Отметиться по геолокации</Button>
             <Text style={styles.muted}>Координаты и погрешность сохранятся с отметкой. Их сможет увидеть преподаватель занятия.</Text>
           </>
-            : <Text style={styles.muted}>{lesson.session_state ? 'Регистрация завершена' : 'Регистрация ещё не открыта'}</Text>}
+            : <Text style={styles.muted}>{lesson.session_state ? 'Регистрация завершена' : lesson.geozone_configured
+              ? 'Регистрация ещё не открыта' : 'Для корпуса ещё не настроена геозона'}</Text>}
       </View>)}
       {loaded && screen === 'history' && records.map(record => <View key={record.session_id} style={styles.card}>
         <Text style={styles.lessonTime}>{dayFormat.format(new Date(record.starts_at))}</Text>

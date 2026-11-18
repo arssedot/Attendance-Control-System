@@ -80,7 +80,7 @@ export function SessionPanel({ lesson, onUpdate }: { lesson: Lesson; onUpdate: (
     void save()
   }
 
-  const mayUpdate = !lesson.session_id || (session?.state !== 'CLOSED' && session !== null)
+  const mayUpdate = (!lesson.session_id && lesson.geozone_configured) || (session?.state !== 'CLOSED' && session !== null)
   return <section className="panel session-panel" aria-busy={busy}>
     <div className="panel-heading">
       <div className="heading-icon"><ScanLine size={20} /></div>
@@ -97,7 +97,9 @@ export function SessionPanel({ lesson, onUpdate }: { lesson: Lesson; onUpdate: (
         <button className="button secondary" onClick={() => projector.current?.showModal()}><Expand size={16} />На экран</button>
       </div>
     </div>}
-    {!sessionId && <div className="session-preview"><ScanLine size={28} /><p>QR-код появится после открытия регистрации.</p></div>}
+    {!sessionId && <div className="session-preview"><ScanLine size={28} /><p>{lesson.geozone_configured
+      ? 'QR-код появится после открытия регистрации.'
+      : 'Для корпуса занятия ещё не настроена геозона. Регистрация недоступна.'}</p></div>}
     {session && !image && <div className="session-preview"><Clock3 size={28} />
       <p>{session.state === 'CLOSED' ? 'Регистрация завершена.' : 'Срок регистрации истёк.'}</p>
     </div>}

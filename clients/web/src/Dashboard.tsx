@@ -31,7 +31,8 @@ function LessonList({ lessons, selected, onSelect }: {
         <div className="lesson-time"><strong>{timeLabel(lesson.starts_at)}</strong><span>{timeLabel(lesson.ends_at)}</span></div>
         <div className="lesson-body">
           <strong>{lesson.subject}</strong>
-          <span className="lesson-meta"><Users size={14} />{lesson.group_name}<span>·</span><MapPin size={14} />Ауд. {lesson.room}</span>
+          <span className="lesson-meta"><Users size={14} />{lesson.group_name}<span>·</span><MapPin size={14} />
+            {lesson.building_name}{lesson.room === '—' ? '' : `, ауд. ${lesson.room}`}</span>
         </div>
         <span className={`badge ${lesson.session_state === 'ACTIVE' ? 'positive' : ''}`}>
           {lesson.session_state ? sessionLabels[lesson.session_state] : 'По расписанию'}
@@ -150,7 +151,7 @@ export function Dashboard({ user, themeControl, onLogout }: {
           <section className="panel schedule-panel" aria-label="Занятия за выбранный день" aria-busy={!loaded}>
             <div className="panel-heading">
               <div className="heading-icon"><CalendarDays size={20} /></div>
-              <div><h2>Занятия</h2><p>{dayFormatter.format(currentDay(day))}</p></div>
+              <div><h2>Занятия</h2><p>{dayFormatter.format(currentDay(day))}{visible.some(item => item.source === 'UNN') ? ' · ННГУ' : ''}</p></div>
               <button className="icon-button outline end" onClick={() => setReload(value => value + 1)} disabled={!loaded || busy}
                 aria-label="Обновить расписание"><RefreshCw size={17} /></button>
             </div>
